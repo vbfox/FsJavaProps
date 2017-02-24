@@ -58,6 +58,7 @@
     <None Include="paket.template">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
+    <Compile Include="Parser.fs" />
   </ItemGroup>
   <ItemGroup>
     <Reference Include="mscorlib" />
@@ -908,5 +909,4 @@
       </ItemGroup>
     </When>
   </Choose>
-  <Import Project="..\..\packages\FSharpLint.MSBuild\build\FSharpLint.MSBuild.targets" Condition="Exists('..\..\packages\FSharpLint.MSBuild\build\FSharpLint.MSBuild.targets')" Label="Paket" />
 </Project>
