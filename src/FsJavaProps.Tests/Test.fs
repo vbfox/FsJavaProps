@@ -1,7 +1,11 @@
 ﻿module FsJavaProps
 
-open NUnit.Framework
+open Expecto
 
-[<Test>]
-let SomeTest () =
-    Assert.AreEqual(1+1, 2)
+[<Tests>]
+let tests =
+    testCase "Sample" <| fun () ->
+        Expect.equal 1 1 "eq"
+
+[<EntryPoint>]
+let main args = runTestsInAssembly defaultConfig args

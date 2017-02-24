@@ -6,11 +6,10 @@ source https://nuget.org/api/v2
 nuget FSharp.Core ~> 4 redirects: force
 
 // Unit tests
-nuget NUnit ~> 3.4.1
+nuget Expecto
 nuget FSharpLint.MSBuild
 
 // Build infrastructure
 nuget FAKE ~> 4.2
 nuget SourceLink.Fake ~> 1.1
-nuget NUnit.Console ~> 3.4.1
 github fsharp/FAKE modules/Octokit/Octokit.fsx
