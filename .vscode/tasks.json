@@ -1,0 +1,17 @@
+{
+    "version": "0.1.0",
+    "tasks": [
+        {
+            "command": "build.sh",
+            "windows": {
+                "command": "build.cmd"
+            },
+            "args": [ ],
+            "taskName": "build",
+            "showOutput": "silent",
+            "isBuildCommand": true,
+            "isShellCommand": true,
+            "problemMatcher": "$msCompile"
+        }
+    ]
+}

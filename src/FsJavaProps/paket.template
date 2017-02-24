@@ -1,0 +1,17 @@
+type file
+id BlackFox.FsJavaProps
+owners Julien Roncaglia
+authors Julien Roncaglia
+tags F# FSharp
+projectUrl
+    https://github.com/vbfox/FsJavaProps
+licenseUrl
+    https://github.com/vbfox/FsJavaProps/blob/master/LICENSE.md
+requireLicenseAcceptance
+    false
+copyright
+    Copyright 2017
+summary
+    FsJavaProps
+description
+    FsJavaProps
