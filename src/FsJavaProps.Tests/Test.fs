@@ -70,8 +70,43 @@ key=value"
                 ]
 
             Expect.equal parsed expected "eq"
+
+        testCase "Space separator" <| fun () ->
+            let parsed = parse "foo bar"
+            let expected = [ KeyValue("foo", "bar") ]
+
+            Expect.equal parsed expected "eq"
+
+        testCase "Equal separator" <| fun () ->
+            let parsed = parse "foo=bar"
+            let expected = [ KeyValue("foo", "bar") ]
+
+            Expect.equal parsed expected "eq"
+
+        testCase "Two points separator" <| fun () ->
+            let parsed = parse "foo:bar"
+            let expected = [ KeyValue("foo", "bar") ]
+
+            Expect.equal parsed expected "eq"
     ]
 
+let xxx =
+    testCase "Truth" <| fun () ->
+        let file = @"
+Truth = Beauty
+    Truth:Beauty
+Truth                  :Beauty"
+        let parsed = parse file
+        let expected =
+            [
+                KeyValue("Truth", "Beauty")
+                KeyValue("Truth", "Beauty")
+                KeyValue("Truth", "Beauty")
+            ]
+
+        Expect.equal parsed expected "eq"
 
 [<EntryPoint>]
-let main args = runTestsInAssembly defaultConfig args
+let main args =
+    //runTests defaultConfig xxx
+    runTestsInAssembly defaultConfig args

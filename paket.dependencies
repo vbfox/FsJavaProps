@@ -7,6 +7,7 @@ nuget FSharp.Core ~> 4 redirects: force
 
 // Unit tests
 nuget Expecto
+nuget Expecto.VisualStudio.TestAdapter version_in_path: true
 nuget FSharpLint.MSBuild
 
 // Build infrastructure

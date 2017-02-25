@@ -29,6 +29,7 @@ let fromLines (lines : string seq) =
                             | 'n' -> parseChar (i+2) (builder.Append('\n'))
                             | 'r' -> parseChar (i+2) (builder.Append('\r'))
                             | 't' -> parseChar (i+2) (builder.Append('\t'))
+                            | 'f' -> parseChar (i+2) (builder.Append('\u000c'))
                             | 'u' -> failwith "Unicode escape not supported"
                             | nextChar -> parseChar (i+2) (builder.Append(nextChar))
                     | c -> parseChar (i+1) (builder.Append(c))
@@ -56,11 +57,11 @@ let fromLines (lines : string seq) =
             let comment = line.Substring(1)
             Some (Comment comment)
         | _ ->
-            let (endOfKey, keyContinuation, key) = parseStringUntil 0 (fun c -> c = ':' || c = '=') line
+            let (endOfKey, keyContinuation, key) = parseStringUntil 0 (fun c -> c = ':' || c = '=' || c = ' ') line
             if keyContinuation then
                 failwith "Multi-line not supported in keys"
             else if endOfKey = line.Length - 1 then
-                failwithf "Key-value separator not found on line: %s" line
+                Some (KeyValue(key, ""))
             else
                 let key = key.TrimEnd()
                 let (_, valueContinuation, value : string) = parseStringUntil (endOfKey+1) (fun _ -> false) line
@@ -81,6 +82,109 @@ let fromLines (lines : string seq) =
 
     parser (Seq.toList lines)
 
-let parse (text : string) =
+let parseOLD (text : string) =
     let lines = text.Split([|'\r'; '\n'|], StringSplitOptions.RemoveEmptyEntries)
     fromLines lines
+
+type CharReader = unit -> char option
+
+let isWhitespace (c: char) = c = ' ' || c = '\t' || c = '\u00ff'
+
+type IsEof =
+    |Yes = 1y
+    |No = 0y
+
+let rec readToFirstChar (c: char option) (reader: CharReader) =
+    match c with
+    | Some ' '
+    | Some '\t'
+    | Some '\u00ff' ->
+        readToFirstChar (reader ()) reader
+    | Some '\r'
+    | Some '\n' ->
+        None, IsEof.No
+    | Some _ -> c, IsEof.No
+    | None -> None, IsEof.Yes
+
+let readKey (c: char option) (reader: CharReader) (buffer: StringBuilder) =
+    let rec recurseEnd (result: string) =
+        match reader () with
+        | Some ':'
+        | Some '='
+        | Some ' ' -> recurseEnd result
+        | Some '\r'
+        | Some '\n' -> result, false, None, IsEof.No
+        | None -> result, false, None, IsEof.Yes
+        | Some c -> result, true, Some c, IsEof.No
+    let rec recurse (c: char option) (buffer: StringBuilder) (escaping: bool) =
+        match c with
+        | Some ' ' -> recurseEnd (buffer.ToString())
+        | Some ':'
+        | Some '=' when not escaping -> recurseEnd (buffer.ToString())
+        | Some '\r'
+        | Some '\n' -> buffer.ToString(), false, None, IsEof.No
+        | None -> buffer.ToString(), false, None, IsEof.Yes
+        | Some '\\' -> recurse (reader ()) (buffer.Append(c)) true
+        | Some c -> recurse (reader ()) (buffer.Append(c)) false
+
+    recurse c buffer false
+
+let rec readComment (reader: CharReader) (buffer: StringBuilder) =
+    match reader () with
+    | Some '\r'
+    | Some '\n' ->
+        buffer.ToString(), IsEof.No
+    | None ->
+        buffer.ToString(), IsEof.Yes
+    | Some c ->
+        readComment reader (buffer.Append(c))
+
+let rec readValue (c: char option) (reader: CharReader) (buffer: StringBuilder) =
+    match c with
+    | Some '\r'
+    | Some '\n' ->
+        buffer.ToString(), IsEof.No
+    | None ->
+        buffer.ToString(), IsEof.Yes
+    | Some c ->
+        readValue (reader()) reader (buffer.Append(c))
+
+let rec readLine (reader: CharReader) (buffer: StringBuilder) =
+    match readToFirstChar (reader ()) reader with
+    | Some '#', _
+    | Some '!', _ ->
+        let comment, isEof = readComment reader (buffer.Clear())
+        Some (Comment comment), isEof
+    | Some firstChar, _ ->
+        let key, hasValue, c, isEof = readKey (Some firstChar) reader (buffer.Clear())
+        let value, isEof =
+            if hasValue then
+                // We know that we aren't at the end of the buffer, but readKey can return None if it didn't need the next char
+                let firstChar = match c with | Some c -> Some c | None -> reader ()
+                readValue firstChar reader (buffer.Clear())
+            else
+                "", isEof
+        Some (KeyValue(key, value)), isEof
+    | None, isEof -> None, isEof
+
+let parse (text : string) =
+    let len = text.Length
+    let mutable i = 0
+    let reader () =
+        if i = len then
+            None
+        else
+            let current = i
+            i <- i + 1
+            Some (text.[current])
+
+    [
+        let buffer = StringBuilder(255)
+        let mutable isEof = IsEof.No
+        while isEof <> IsEof.Yes do
+            let line, isEofAfterLine = readLine reader buffer
+            match line with
+            | Some line -> yield line
+            | None -> ()
+            isEof <- isEofAfterLine
+    ]
