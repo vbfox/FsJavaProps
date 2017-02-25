@@ -58,7 +58,7 @@
     <None Include="paket.template">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
-    <Compile Include="Parser.fs" />
+    <Compile Include="FsJavaProps.fs" />
   </ItemGroup>
   <ItemGroup>
     <Reference Include="mscorlib" />

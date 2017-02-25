@@ -6,7 +6,7 @@ open BlackFox.FsJavaProps
 let private parse s = parseString s |> List.ofSeq
 
 [<Tests>]
-let tests =
+let fromDoc =
     testList "From doc" [
         testCase "Fruits" <| fun () ->
             let file = @"
@@ -72,7 +72,11 @@ key=value"
                 ]
 
             Expect.equal parsed expected "eq"
+        ]
 
+[<Tests>]
+let specialCases =
+    testList "Special cases" [
         testCase "Space separator" <| fun () ->
             let parsed = parse "foo bar"
             let expected = [ KeyValue("foo", "bar") ]
@@ -120,6 +124,25 @@ key=value"
                 (parse "foo:\\uD83D\\udc0e")
                 ([ KeyValue("foo", "\uD83D\udc0e") ])
                 "eq"
+    ]
+
+[<Tests>]
+let fullFiles =
+    testList "Fullfiles" [
+        testCase "1" <| fun () ->
+            let parsed = parse @"#Fri Jan 17 22:37:45 MYT 2014
+dbpassword=password
+database=localhost
+dbuser=vbfox"
+            let expected =
+                [
+                    Comment("Fri Jan 17 22:37:45 MYT 2014")
+                    KeyValue("dbpassword", "password")
+                    KeyValue("database", "localhost")
+                    KeyValue("dbuser", "vbfox")
+                ]
+
+            Expect.equal parsed expected "eq"
     ]
 
 [<EntryPoint>]

@@ -19,8 +19,8 @@ module private Parser =
         | None -> None
 
     type IsEof =
-        |Yes = 1y
-        |No = 0y
+        | Yes = 1y
+        | No = 0y
 
     let rec readToFirstChar (c: char option) (reader: CharReader) =
         match c with
