@@ -1,7 +1,8 @@
-﻿module Parser
+﻿module BlackFox.FsJavaProps
 
 open System.Text
-open System
+open System.IO
+open System.Globalization
 
 type PropertiesFileEntry =
 | Comment of text : string
@@ -9,182 +10,168 @@ type PropertiesFileEntry =
 
 type PropertiesFile = PropertiesFileEntry list
 
-let fromLines (lines : string seq) =
-    let parseStringUntil (from : int) (f : char -> bool) (s : string) =
-        let rec parseChar (i : int) (builder : StringBuilder) =
-            if i >= s.Length then
-                i-1, false, builder
-            else
-                let c = s.[i]
-                if f c then
-                    i-1, false, builder
-                else
-                    match c with
-                    | '\\' ->
-                        if i+1 >= s.Length then
-                            i, true, builder
-                        else
-                            let nextChar = s.[i+1]
-                            match nextChar with
-                            | 'n' -> parseChar (i+2) (builder.Append('\n'))
-                            | 'r' -> parseChar (i+2) (builder.Append('\r'))
-                            | 't' -> parseChar (i+2) (builder.Append('\t'))
-                            | 'f' -> parseChar (i+2) (builder.Append('\u000c'))
-                            | 'u' -> failwith "Unicode escape not supported"
-                            | nextChar -> parseChar (i+2) (builder.Append(nextChar))
-                    | c -> parseChar (i+1) (builder.Append(c))
+module private Parser =
+    type CharReader = unit -> char option
 
-        let (i, continuation, builder) = parseChar from (new StringBuilder())
-        i, continuation, builder.ToString()
-
-    let rec continuationLineParser (lines : string list) =
-        match lines with
-        | [] -> failwith "Expected a continuation but reached the last line"
-        | line :: rest ->
-            let line = line.TrimStart()
-            match parseStringUntil 0 (fun _ -> false) line with
-            | _, true, text ->
-                let (remainingLines, x) = continuationLineParser rest
-                remainingLines, text + x
-            | _, false, text -> rest, text
-
-    let normalLineParser (line : string) (nextLines : string list) =
-        let line = line.TrimStart()
-        let firstChar = if line.Length > 0 then Some(line.[0]) else None
-        match firstChar with
-        | None -> None
-        | Some(c) when c ='#' || c = '!' ->
-            let comment = line.Substring(1)
-            Some (Comment comment)
-        | _ ->
-            let (endOfKey, keyContinuation, key) = parseStringUntil 0 (fun c -> c = ':' || c = '=' || c = ' ') line
-            if keyContinuation then
-                failwith "Multi-line not supported in keys"
-            else if endOfKey = line.Length - 1 then
-                Some (KeyValue(key, ""))
-            else
-                let key = key.TrimEnd()
-                let (_, valueContinuation, value : string) = parseStringUntil (endOfKey+1) (fun _ -> false) line
-                let value = value.TrimStart()
-                (*let rest, value =
-                    if valueContinuation then
-                        value + (continuationLineParser nextLines) else value*)
-
-                Some (KeyValue(key, value))
-
-    let rec parser (remaining : string list) =
-        match remaining with
-        | [] -> []
-        | line :: rest ->
-            match normalLineParser line rest with
-            | None -> parser rest
-            | Some(content) -> content :: (parser rest)
-
-    parser (Seq.toList lines)
-
-let parseOLD (text : string) =
-    let lines = text.Split([|'\r'; '\n'|], StringSplitOptions.RemoveEmptyEntries)
-    fromLines lines
-
-type CharReader = unit -> char option
-
-let isWhitespace (c: char) = c = ' ' || c = '\t' || c = '\u00ff'
-
-type IsEof =
-    |Yes = 1y
-    |No = 0y
-
-let rec readToFirstChar (c: char option) (reader: CharReader) =
-    match c with
-    | Some ' '
-    | Some '\t'
-    | Some '\u00ff' ->
-        readToFirstChar (reader ()) reader
-    | Some '\r'
-    | Some '\n' ->
-        None, IsEof.No
-    | Some _ -> c, IsEof.No
-    | None -> None, IsEof.Yes
-
-let readKey (c: char option) (reader: CharReader) (buffer: StringBuilder) =
-    let rec recurseEnd (result: string) =
-        match reader () with
-        | Some ':'
-        | Some '='
-        | Some ' ' -> recurseEnd result
-        | Some '\r'
-        | Some '\n' -> result, false, None, IsEof.No
-        | None -> result, false, None, IsEof.Yes
-        | Some c -> result, true, Some c, IsEof.No
-    let rec recurse (c: char option) (buffer: StringBuilder) (escaping: bool) =
+    let inline (|IsWhitespace|_|) c =
         match c with
-        | Some ' ' -> recurseEnd (buffer.ToString())
-        | Some ':'
-        | Some '=' when not escaping -> recurseEnd (buffer.ToString())
+        | Some c -> if c = ' ' || c = '\t' || c = '\u00ff' then Some c else None
+        | None -> None
+
+    type IsEof =
+        |Yes = 1y
+        |No = 0y
+
+    let rec readToFirstChar (c: char option) (reader: CharReader) =
+        match c with
+        | IsWhitespace _ ->
+            readToFirstChar (reader ()) reader
         | Some '\r'
-        | Some '\n' -> buffer.ToString(), false, None, IsEof.No
-        | None -> buffer.ToString(), false, None, IsEof.Yes
-        | Some '\\' -> recurse (reader ()) (buffer.Append(c)) true
-        | Some c -> recurse (reader ()) (buffer.Append(c)) false
+        | Some '\n' ->
+            None, IsEof.No
+        | Some _ -> c, IsEof.No
+        | None -> None, IsEof.Yes
 
-    recurse c buffer false
-
-let rec readComment (reader: CharReader) (buffer: StringBuilder) =
-    match reader () with
-    | Some '\r'
-    | Some '\n' ->
-        buffer.ToString(), IsEof.No
-    | None ->
-        buffer.ToString(), IsEof.Yes
-    | Some c ->
-        readComment reader (buffer.Append(c))
-
-let rec readValue (c: char option) (reader: CharReader) (buffer: StringBuilder) =
-    match c with
-    | Some '\r'
-    | Some '\n' ->
-        buffer.ToString(), IsEof.No
-    | None ->
-        buffer.ToString(), IsEof.Yes
-    | Some c ->
-        readValue (reader()) reader (buffer.Append(c))
-
-let rec readLine (reader: CharReader) (buffer: StringBuilder) =
-    match readToFirstChar (reader ()) reader with
-    | Some '#', _
-    | Some '!', _ ->
-        let comment, isEof = readComment reader (buffer.Clear())
-        Some (Comment comment), isEof
-    | Some firstChar, _ ->
-        let key, hasValue, c, isEof = readKey (Some firstChar) reader (buffer.Clear())
-        let value, isEof =
-            if hasValue then
-                // We know that we aren't at the end of the buffer, but readKey can return None if it didn't need the next char
-                let firstChar = match c with | Some c -> Some c | None -> reader ()
-                readValue firstChar reader (buffer.Clear())
+    let inline (|EscapeSequence|_|) c =
+        match c with
+        | Some c ->
+            if c = 'r' || c = 'n' || c = 'u' || c = 'f' || c = 't' || c = '"' || c = ''' || c = '\\' then
+                Some c
             else
-                "", isEof
-        Some (KeyValue(key, value)), isEof
-    | None, isEof -> None, isEof
+                None
+        | None -> None
 
-let parse (text : string) =
-    let len = text.Length
-    let mutable i = 0
-    let reader () =
-        if i = len then
-            None
-        else
-            let current = i
-            i <- i + 1
-            Some (text.[current])
+    let inline isHex c = (c >= '0' && c <= '9') || (c >= 'A' && c <= 'F') || (c >= 'a' && c <= 'f')
 
-    [
+    let readEscapeSequence (c: char) (reader: CharReader) =
+        match c with
+        | 'r' -> '\r'
+        | 'n' -> '\n'
+        | 'f' -> '\f'
+        | 't' -> '\t'
+        | 'u' ->
+            match reader(), reader(), reader(), reader() with
+            | Some c1, Some c2, Some c3, Some c4 when isHex c1 && isHex c2 && isHex c3 && isHex c4 ->
+                let hex = new System.String([|c1;c2;c3;c4|])
+                let value = System.UInt16.Parse(hex, NumberStyles.AllowHexSpecifier, CultureInfo.InvariantCulture)
+                char value
+            | _ ->
+                 failwith "Invalid unicode escape"
+        | _ -> c
+
+    let inline readKey (c: char option) (reader: CharReader) (buffer: StringBuilder) =
+        let rec recurseEnd (result: string) =
+            match reader () with
+            | Some ':'
+            | Some '='
+            | IsWhitespace _ -> recurseEnd result
+            | Some '\r'
+            | Some '\n' -> result, false, None, IsEof.No
+            | None -> result, false, None, IsEof.Yes
+            | Some c -> result, true, Some c, IsEof.No
+        let rec recurse (c: char option) (buffer: StringBuilder) (escaping: bool) =
+            match c with
+            | EscapeSequence c when escaping ->
+                let realChar = readEscapeSequence c reader
+                recurse (reader()) (buffer.Append(realChar)) false
+            | Some ' ' -> recurseEnd (buffer.ToString())
+            | Some ':'
+            | Some '=' when not escaping -> recurseEnd (buffer.ToString())
+            | Some '\r'
+            | Some '\n' -> buffer.ToString(), false, None, IsEof.No
+            | None -> buffer.ToString(), false, None, IsEof.Yes
+            | Some '\\' -> recurse (reader ()) buffer true
+            | Some c -> recurse (reader ()) (buffer.Append(c)) false
+
+        recurse c buffer false
+
+    let rec readComment (reader: CharReader) (buffer: StringBuilder) =
+        match reader () with
+        | Some '\r'
+        | Some '\n' ->
+            Some (Comment (buffer.ToString())), IsEof.No
+        | None ->
+            Some(Comment (buffer.ToString())), IsEof.Yes
+        | Some c ->
+            readComment reader (buffer.Append(c))
+
+    let inline readValue (c: char option) (reader: CharReader) (buffer: StringBuilder) =
+        let rec recurse (c: char option) (buffer: StringBuilder) (escaping: bool) (cr: bool) (lineStart: bool) =
+            match c with
+            | EscapeSequence c when escaping ->
+                let realChar = readEscapeSequence c reader
+                recurse (reader()) (buffer.Append(realChar)) false false false
+            | Some '\r'
+            | Some '\n' ->
+                if escaping || (cr && c = Some '\n') then
+                    recurse (reader ()) buffer false (c = Some '\r') true
+                else
+                    buffer.ToString(), IsEof.No
+            | None ->
+                buffer.ToString(), IsEof.Yes
+            | Some _ when lineStart ->
+                let firstChar, _ = readToFirstChar c reader
+                recurse firstChar buffer false false false
+            | Some '\\' -> recurse (reader ()) buffer true false false
+            | Some c ->
+                recurse (reader()) (buffer.Append(c)) false false false
+
+        recurse c buffer false false true
+
+    let rec readLine (reader: CharReader) (buffer: StringBuilder) =
+        match readToFirstChar (reader ()) reader with
+        | Some '#', _
+        | Some '!', _ ->
+            readComment reader (buffer.Clear())
+        | Some firstChar, _ ->
+            let key, hasValue, c, isEof = readKey (Some firstChar) reader (buffer.Clear())
+            let value, isEof =
+                if hasValue then
+                    // We know that we aren't at the end of the buffer, but readKey can return None if it didn't need the next char
+                    let firstChar = match c with | Some c -> Some c | None -> reader ()
+                    readValue firstChar reader (buffer.Clear())
+                else
+                    "", isEof
+            Some (KeyValue(key, value)), isEof
+        | None, isEof -> None, isEof
+
+    let inline stringToReader (s: string) =
+        let len = s.Length
+        let mutable i = 0
+        fun () ->
+            if i = len then
+                None
+            else
+                let current = i
+                i <- i + 1
+                Some (s.[current])
+
+    let inline textReaderToReader (reader: TextReader) =
+        let buffer = [| '\u0000' |]
+        fun () ->
+            let eof = reader.Read(buffer, 0, 1) = 0
+            if eof then None else Some (buffer.[0])
+
+    let parseWithReader reader =
         let buffer = StringBuilder(255)
         let mutable isEof = IsEof.No
-        while isEof <> IsEof.Yes do
-            let line, isEofAfterLine = readLine reader buffer
-            match line with
-            | Some line -> yield line
-            | None -> ()
-            isEof <- isEofAfterLine
-    ]
+
+        seq {
+            while isEof <> IsEof.Yes do
+                let line, isEofAfterLine = readLine reader buffer
+                match line with
+                | Some line -> yield line
+                | None -> ()
+                isEof <- isEofAfterLine
+        }
+
+
+open Parser
+
+let parseTextReader (reader: TextReader) =
+    let reader = textReaderToReader reader
+    parseWithReader reader
+
+let parseString (text : string) =
+    let reader = stringToReader text
+    parseWithReader reader

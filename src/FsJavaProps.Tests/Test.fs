@@ -1,7 +1,9 @@
 ﻿module FsJavaProps
 
 open Expecto
-open Parser
+open BlackFox.FsJavaProps
+
+let private parse s = parseString s |> List.ofSeq
 
 [<Tests>]
 let tests =
@@ -84,29 +86,42 @@ key=value"
             Expect.equal parsed expected "eq"
 
         testCase "Two points separator" <| fun () ->
-            let parsed = parse "foo:bar"
-            let expected = [ KeyValue("foo", "bar") ]
+            Expect.equal
+                (parse "foo:bar")
+                ([ KeyValue("foo", "bar") ])
+                "eq"
 
-            Expect.equal parsed expected "eq"
+        testCase "Ends with escape" <| fun () ->
+            Expect.equal
+                (parse "foo:bar\\\r\n")
+                ([ KeyValue("foo", "bar") ])
+                "eq"
+
+        testCase "Escaped tab in key" <| fun () ->
+            Expect.equal
+                (parse "fo\\to:bar")
+                ([ KeyValue("fo\to", "bar") ])
+                "eq"
+
+        testCase "Escaped tab in value" <| fun () ->
+            Expect.equal
+                (parse "foo:ba\\tr")
+                ([ KeyValue("foo", "ba\tr") ])
+                "eq"
+
+        testCase "Unicode in key" <| fun () ->
+            Expect.equal
+                (parse "\\uD83D\\udc0e")
+                ([ KeyValue("\uD83D\udc0e", "") ])
+                "eq"
+
+        testCase "Unicode in value" <| fun () ->
+            Expect.equal
+                (parse "foo:\\uD83D\\udc0e")
+                ([ KeyValue("foo", "\uD83D\udc0e") ])
+                "eq"
     ]
-
-let xxx =
-    testCase "Truth" <| fun () ->
-        let file = @"
-Truth = Beauty
-    Truth:Beauty
-Truth                  :Beauty"
-        let parsed = parse file
-        let expected =
-            [
-                KeyValue("Truth", "Beauty")
-                KeyValue("Truth", "Beauty")
-                KeyValue("Truth", "Beauty")
-            ]
-
-        Expect.equal parsed expected "eq"
 
 [<EntryPoint>]
 let main args =
-    //runTests defaultConfig xxx
     runTestsInAssembly defaultConfig args
